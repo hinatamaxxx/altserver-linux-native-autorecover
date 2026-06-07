@@ -20,8 +20,39 @@ anisette_ok() {
   return 1
 }
 
+find_iphone_ip() {
+  ipaddr="$(ip neigh show | awk -v mac="$(printf '%s' "$IPHONE_WIFI_MAC" | tr 'A-F' 'a-f')" '
+    $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && tolower($0) ~ mac {print $1; exit}
+  ')"
+  if [ -n "${ipaddr:-}" ] && nc -z -w 2 "$ipaddr" 62078 >/dev/null 2>&1; then
+    printf '%s\n' "$ipaddr"
+    return 0
+  fi
+
+  ipaddr="$(timeout 8 avahi-browse -rt _apple-mobdev2._tcp 2>/dev/null |
+    sed -n 's/.*address = \[\([0-9][0-9.]*\)\].*/\1/p' |
+    while read candidate; do
+      if nc -z -w 2 "$candidate" 62078 >/dev/null 2>&1; then
+        printf '%s\n' "$candidate"
+        break
+      fi
+    done)"
+  if [ -n "${ipaddr:-}" ]; then
+    printf '%s\n' "$ipaddr"
+    return 0
+  fi
+
+  if [ -n "${IPHONE_FALLBACK_IP:-}" ] && nc -z -w 2 "$IPHONE_FALLBACK_IP" 62078 >/dev/null 2>&1; then
+    printf '%s\n' "$IPHONE_FALLBACK_IP"
+    return 0
+  fi
+
+  return 1
+}
+
 iphone_port_ok() {
-  nc -z -w 4 "$IPHONE_FALLBACK_IP" 62078 >/dev/null 2>&1
+  CURRENT_IPHONE_IP="$(find_iphone_ip)"
+  export CURRENT_IPHONE_IP
 }
 
 netmux_has_network_device() {
@@ -102,7 +133,7 @@ if ! systemctl is-active --quiet altserver-anisette-docker.service || ! anisette
 fi
 
 if ! iphone_port_ok; then
-  log "iPhone ${IPHONE_FALLBACK_IP}:62078 is not reachable; leaving services running"
+  log "iPhone Wi-Fi sync port 62078 is not reachable; leaving services running"
   exit 0
 fi
 

@@ -3,18 +3,46 @@ set -eu
 
 . /etc/altserver-native.env
 
-while :; do
-  ipaddr="$(ip neigh show | awk -v mac="$(printf '%s' "$IPHONE_WIFI_MAC" | tr 'A-F' 'a-f')" 'tolower($0) ~ mac {print $1; exit}')"
-  if [ -z "${ipaddr:-}" ]; then
-    ipaddr="$IPHONE_FALLBACK_IP"
+find_iphone_ip() {
+  ipaddr="$(ip neigh show | awk -v mac="$(printf '%s' "$IPHONE_WIFI_MAC" | tr 'A-F' 'a-f')" '
+    $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && tolower($0) ~ mac {print $1; exit}
+  ')"
+  if [ -n "${ipaddr:-}" ] && nc -z -w 2 "$ipaddr" 62078 >/dev/null 2>&1; then
+    printf '%s\n' "$ipaddr"
+    return 0
   fi
 
-  tmp="$(mktemp)"
-  grep -vE '[[:space:]]iphone-alt\.local$' /etc/avahi/hosts 2>/dev/null >"$tmp" || true
-  printf '%s iphone-alt.local\n' "$ipaddr" >>"$tmp"
-  cat "$tmp" >/etc/avahi/hosts
-  rm -f "$tmp"
+  ipaddr="$(timeout 8 avahi-browse -rt _apple-mobdev2._tcp 2>/dev/null |
+    sed -n 's/.*address = \[\([0-9][0-9.]*\)\].*/\1/p' |
+    while read candidate; do
+      if nc -z -w 2 "$candidate" 62078 >/dev/null 2>&1; then
+        printf '%s\n' "$candidate"
+        break
+      fi
+    done)"
+  if [ -n "${ipaddr:-}" ]; then
+    printf '%s\n' "$ipaddr"
+    return 0
+  fi
 
-  systemctl reload avahi-daemon.service 2>/dev/null || systemctl restart avahi-daemon.service || true
+  if [ -n "${IPHONE_FALLBACK_IP:-}" ] && nc -z -w 2 "$IPHONE_FALLBACK_IP" 62078 >/dev/null 2>&1; then
+    printf '%s\n' "$IPHONE_FALLBACK_IP"
+    return 0
+  fi
+
+  return 1
+}
+
+while :; do
+  if ipaddr="$(find_iphone_ip)"; then
+    tmp="$(mktemp)"
+    grep -vE '[[:space:]]iphone-alt\.local$' /etc/avahi/hosts 2>/dev/null >"$tmp" || true
+    printf '%s iphone-alt.local\n' "$ipaddr" >>"$tmp"
+    cat "$tmp" >/etc/avahi/hosts
+    rm -f "$tmp"
+
+    systemctl reload avahi-daemon.service 2>/dev/null || systemctl restart avahi-daemon.service || true
+  fi
+
   sleep 60
 done
