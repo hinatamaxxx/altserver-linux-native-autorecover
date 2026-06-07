@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+# USB trust/pairing and iPhone Wi-Fi discovery can settle late after boot.
+# Try frequently for the first few minutes, then leave the periodic timer to continue.
+sleep 30
+
+i=0
+while [ "$i" -lt 18 ]; do
+  if /usr/local/sbin/altserver-native-healthcheck; then
+    exit 0
+  fi
+  i=$((i+1))
+  sleep 20
+done
+
+exit 0

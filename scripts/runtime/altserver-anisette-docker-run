@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+. "${ENV_FILE:-/etc/altserver-native.env}"
+
+image="${ANISETTE_DOCKER_IMAGE:-dadoum/anisette-v3-server:latest}"
+volume="${ANISETTE_DOCKER_VOLUME:-altserver-anisette-data}"
+
+case "$image" in
+  dadoum/anisette-v3-server|dadoum/anisette-v3-server:*)
+    exec /usr/bin/docker run --rm --name altserver-anisette --network host \
+      -v "${volume}:/home/Alcoholic/.config/anisette-v3/lib/" \
+      "$image"
+    ;;
+esac
+
+if [ -n "${ANISETTE_BIN_MOUNT:-}" ] &&
+   [ -n "${ANISETTE_LIB_MOUNT:-}" ] &&
+   [ -x "${ANISETTE_BIN_MOUNT}/anisette-server" ] &&
+   [ -d "${ANISETTE_LIB_MOUNT}" ]; then
+  exec /usr/bin/docker run --rm --name altserver-anisette --network host \
+    -v "${ANISETTE_BIN_MOUNT}:/altserver/bin:ro" \
+    -v "${ANISETTE_LIB_MOUNT}:/root/.config/Provision/lib:ro" \
+    --entrypoint /altserver/bin/anisette-server \
+    "$image" -n 127.0.0.1 -p 6969
+fi
+
+exec /usr/bin/docker run --rm --name altserver-anisette --network host \
+  --entrypoint /altserver/bin/anisette-server \
+  "$image" -n 127.0.0.1 -p 6969

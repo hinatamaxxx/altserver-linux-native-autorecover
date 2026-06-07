@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+. /etc/altserver-native.env
+
+while :; do
+  ipaddr="$(ip neigh show | awk -v mac="$(printf '%s' "$IPHONE_WIFI_MAC" | tr 'A-F' 'a-f')" 'tolower($0) ~ mac {print $1; exit}')"
+  if [ -z "${ipaddr:-}" ]; then
+    ipaddr="$IPHONE_FALLBACK_IP"
+  fi
+
+  tmp="$(mktemp)"
+  grep -vE '[[:space:]]iphone-alt\.local$' /etc/avahi/hosts 2>/dev/null >"$tmp" || true
+  printf '%s iphone-alt.local\n' "$ipaddr" >>"$tmp"
+  cat "$tmp" >/etc/avahi/hosts
+  rm -f "$tmp"
+
+  systemctl reload avahi-daemon.service 2>/dev/null || systemctl restart avahi-daemon.service || true
+  sleep 60
+done
