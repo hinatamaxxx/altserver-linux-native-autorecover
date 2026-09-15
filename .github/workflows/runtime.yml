@@ -1,0 +1,18 @@
+name: Runtime checks
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Regression tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Shell syntax
+        run: |
+          sh -n install.sh
+          for script in scripts/*.sh; do sh -n "$script"; done
+          for script in scripts/runtime/*; do
+            if head -n 1 "$script" | grep -q '/sh'; then sh -n "$script"; fi
+          done
+      - name: Privacy scan
+        run: node tools/privacy-scan.js .

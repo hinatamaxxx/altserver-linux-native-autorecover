@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""Bounded protocol probes. Output never contains pairing or anisette data."""
+import ipaddress
+import os
+import plistlib
+import re
+import socket
+import struct
+import subprocess
+import sys
+import time
+import json
+import urllib.request
+from datetime import datetime, timezone
+
+MAX_PACKET = 4 * 1024 * 1024
+
+
+def recv_exact(sock, count):
+    data = bytearray()
+    while len(data) < count:
+        chunk = sock.recv(count - len(data))
+        if not chunk:
+            raise OSError("truncated protocol response")
+        data.extend(chunk)
+    return bytes(data)
+
+
+def mux_request(payload, address=("127.0.0.1", 27015)):
+    body = plistlib.dumps(payload, fmt=plistlib.FMT_XML)
+    with socket.create_connection(address, timeout=5) as sock:
+        sock.sendall(struct.pack("<IIII", len(body) + 16, 1, 8, 1) + body)
+        length, version, kind, tag = struct.unpack("<IIII", recv_exact(sock, 16))
+        if not 16 < length <= MAX_PACKET or (version, kind, tag) != (1, 8, 1):
+            raise ValueError("invalid usbmux response header")
+        result = plistlib.loads(recv_exact(sock, length - 16))
+        if not isinstance(result, dict):
+            raise ValueError("invalid usbmux response body")
+        return result
+
+
+def devices():
+    return mux_request({"MessageType": "ListDevices", "ClientVersionString": "altserver-health",
+                        "ProgName": "altserver-health", "kLibUSBMuxVersion": 3}).get("DeviceList", [])
+
+
+def has_device(udid):
+    return any(d.get("Properties", {}).get("SerialNumber") == udid and
+               d.get("Properties", {}).get("ConnectionType") == "Network" for d in devices())
+
+
+def output(command, timeout=10):
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=timeout).stdout
+    except subprocess.TimeoutExpired as exc:
+        value = exc.stdout or b""
+        return value.decode(errors="replace") if isinstance(value, bytes) else value
+
+
+def unescape(value):
+    return re.sub(r"\\([0-9]{3})", lambda m: chr(int(m[1])), value)
+
+
+def mdns_records(text):
+    for line in text.splitlines():
+        parts = line.split(";")
+        if len(parts) >= 9 and parts[0] == "=" and parts[2] == "IPv4":
+            yield dict(interface=parts[1], name=unescape(parts[3]), service=parts[4],
+                       host=unescape(parts[6]), ip=parts[7], port=parts[8])
+
+
+def candidates(neighbors, mdns, mac, udid, fallback):
+    found = []
+    for line in neighbors.splitlines():
+        fields = line.lower().split()
+        if "lladdr" in fields and fields[fields.index("lladdr") + 1] == mac.lower():
+            found.append(fields[0])
+    for record in mdns_records(mdns):
+        name = record["name"].lower()
+        # Never feed our own synthetic record back into discovery.
+        if record["host"].rstrip(".") == "iphone-alt.local":
+            continue
+        if record["service"] == "_apple-mobdev2._tcp" and (
+            name.startswith(mac.lower() + "@") or name.endswith("@" + udid.lower())
+        ):
+            found.append(record["ip"])
+    if fallback:
+        found.append(fallback)
+    result = []
+    for candidate in found:
+        try:
+            address = ipaddress.IPv4Address(candidate)
+        except ipaddress.AddressValueError:
+            continue
+        if not address.is_unspecified and not address.is_multicast and not address.is_loopback:
+            if str(address) not in result:
+                result.append(str(address))
+    return result
+
+
+def device_identity(address, udid):
+    # A reachable port is not identity evidence: DHCP can reassign an old IP.
+    request = plistlib.dumps({"Label": "altserver-health", "Request": "GetValue",
+                               "Key": "UniqueDeviceID"}, fmt=plistlib.FMT_XML)
+    try:
+        with socket.create_connection((address, 62078), timeout=2) as sock:
+            sock.sendall(struct.pack(">I", len(request)) + request)
+            length = struct.unpack(">I", recv_exact(sock, 4))[0]
+            if not 0 < length <= MAX_PACKET:
+                return False
+            return plistlib.loads(recv_exact(sock, length)).get("Value") == udid
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        return False
+
+
+def discover():
+    udid = os.environ["IPHONE_UDID"]
+    neighbors = output(["ip", "-4", "neigh", "show"])
+    records = output(["avahi-browse", "-prt", "_apple-mobdev2._tcp"], timeout=8)
+    matched = candidates(neighbors, records, os.environ["IPHONE_WIFI_MAC"], udid, "")
+    for candidate in candidates(neighbors, records, os.environ["IPHONE_WIFI_MAC"], udid,
+                                os.environ.get("IPHONE_FALLBACK_IP", "")):
+        if (candidate in matched and port_open(candidate)) or device_identity(candidate, udid):
+            return candidate
+    return None
+
+
+def port_open(address):
+    try:
+        with socket.create_connection((address, 62078), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+def valid_anisette_response(response, now=None):
+    if response.get("identifier") != "AnisetteDataResponse" or response.get("version") != 1:
+        return False
+    data = response.get("anisetteData")
+    required = ("machineID", "oneTimePassword", "localUserID", "routingInfo", "deviceUniqueIdentifier",
+                "deviceSerialNumber", "deviceDescription", "date", "locale", "timeZone")
+    if not isinstance(data, dict) or not all(isinstance(data.get(key), str) and data[key] for key in required):
+        return False
+    try:
+        timestamp = datetime.fromisoformat(data["date"].replace("Z", "+00:00"))
+        if timestamp.tzinfo is None or not data["routingInfo"].isdigit():
+            return False
+        return abs(((now or datetime.now(timezone.utc)) - timestamp).total_seconds()) <= 120
+    except (TypeError, ValueError):
+        return False
+
+
+def altserver_protocol(port):
+    body = json.dumps({"version": 1, "identifier": "AnisetteDataRequest"}).encode()
+    with socket.create_connection(("127.0.0.1", int(port)), timeout=8) as sock:
+        sock.sendall(struct.pack("<I", len(body)) + body)
+        size = struct.unpack("<I", recv_exact(sock, 4))[0]
+        if not 0 < size <= MAX_PACKET:
+            return False
+        response = json.loads(recv_exact(sock, size))
+    return isinstance(response, dict) and valid_anisette_response(response)
+
+
+def main():
+    action = sys.argv[1]
+    if action == "anisette":
+        with urllib.request.urlopen(os.environ["ANISETTE_URL"], timeout=5) as response:
+            if response.headers.get_content_type() != "application/json":
+                return 1
+            data = json.loads(response.read(MAX_PACKET + 1))
+        keys = ("X-Apple-I-MD", "X-Apple-I-MD-M", "X-Apple-I-MD-LU", "X-Mme-Device-Id")
+        return 0 if isinstance(data, dict) and all(isinstance(data.get(key), str) and data[key] for key in keys) else 1
+    if action == "altserver":
+        pid = output(["systemctl", "show", "altserver-native.service", "-p", "MainPID", "--value"]).strip()
+        if not pid.isdigit() or pid == "0":
+            return 1
+        ports = set()
+        for line in output(["ss", "-H", "-ltnp"]).splitlines():
+            if "pid=" + pid + "," in line:
+                fields = line.split()
+                if len(fields) >= 4:
+                    ports.add(fields[3].rsplit(":", 1)[-1])
+        records = output(["avahi-browse", "-prt", "_altserver._tcp"], timeout=8)
+        matched = [r["port"] for r in mdns_records(records) if r["service"] == "_altserver._tcp"
+                   and r["ip"] == os.environ["ALTSERVER_HOST_IP"] and r["port"] in ports]
+        return 0 if matched and altserver_protocol(matched[0]) else 1
+    if action == "query":
+        devices()
+        return 0
+    if action == "discover":
+        address = discover()
+        if address:
+            print(address)
+            return 0
+        return 2
+    if action == "network":
+        return 0 if has_device(os.environ["IPHONE_UDID"]) else 1
+    if action == "register":
+        address = sys.argv[2]
+        udid = os.environ["IPHONE_UDID"]
+        if discover() != address:
+            return 2
+        if has_device(udid):
+            return 0
+        # v0.1.4's AddDevice starts two heartbeat workers for one device.
+        # Reannounce instead, using its normal discovery path with one worker.
+        subprocess.run(["systemctl", "restart", "iphone-mobdev-service.service"], check=True, timeout=15)
+        time.sleep(8)
+        return 0 if has_device(udid) else 1
+    raise ValueError("unknown probe action")
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, KeyError, plistlib.InvalidFileException) as exc:
+        print("Probe failed: " + type(exc).__name__, file=sys.stderr)
+        sys.exit(1)

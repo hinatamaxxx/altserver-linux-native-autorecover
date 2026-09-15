@@ -1,48 +1,28 @@
 #!/bin/sh
 set -eu
-
-. /etc/altserver-native.env
-
-find_iphone_ip() {
-  ipaddr="$(ip neigh show | awk -v mac="$(printf '%s' "$IPHONE_WIFI_MAC" | tr 'A-F' 'a-f')" '
-    $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && tolower($0) ~ mac {print $1; exit}
-  ')"
-  if [ -n "${ipaddr:-}" ] && nc -z -w 2 "$ipaddr" 62078 >/dev/null 2>&1; then
-    printf '%s\n' "$ipaddr"
-    return 0
-  fi
-
-  ipaddr="$(timeout 8 avahi-browse -rt _apple-mobdev2._tcp 2>/dev/null |
-    sed -n 's/.*address = \[\([0-9][0-9.]*\)\].*/\1/p' |
-    while read candidate; do
-      if nc -z -w 2 "$candidate" 62078 >/dev/null 2>&1; then
-        printf '%s\n' "$candidate"
-        break
-      fi
-    done)"
-  if [ -n "${ipaddr:-}" ]; then
-    printf '%s\n' "$ipaddr"
-    return 0
-  fi
-
-  if [ -n "${IPHONE_FALLBACK_IP:-}" ] && nc -z -w 2 "$IPHONE_FALLBACK_IP" 62078 >/dev/null 2>&1; then
-    printf '%s\n' "$IPHONE_FALLBACK_IP"
-    return 0
-  fi
-
-  return 1
-}
+set -a
+. "${ENV_FILE:-/etc/altserver-native.env}"
+set +a
+probe="${ALTSERVER_PROBE:-/usr/local/sbin/altserver-native-probe}"
+hosts="${AVAHI_HOSTS_FILE:-/etc/avahi/hosts}"
+tmp=""
+trap 'if [ -n "$tmp" ]; then rm -f "$tmp"; fi' EXIT
+trap 'exit 0' TERM INT
 
 while :; do
-  if ipaddr="$(find_iphone_ip)"; then
-    tmp="$(mktemp)"
-    grep -vE '[[:space:]]iphone-alt\.local$' /etc/avahi/hosts 2>/dev/null >"$tmp" || true
-    printf '%s iphone-alt.local\n' "$ipaddr" >>"$tmp"
-    cat "$tmp" >/etc/avahi/hosts
-    rm -f "$tmp"
-
-    systemctl reload avahi-daemon.service 2>/dev/null || systemctl restart avahi-daemon.service || true
+  if ipaddr="$("$probe" discover)"; then
+    previous="$(awk '$2 == "iphone-alt.local" {print $1}' "$hosts" 2>/dev/null || true)"
+    if [ "$previous" != "$ipaddr" ]; then
+      tmp="$(mktemp)"
+      awk '$2 != "iphone-alt.local"' "$hosts" >"$tmp" 2>/dev/null || true
+      printf '%s iphone-alt.local\n' "$ipaddr" >>"$tmp"
+      cat "$tmp" >"$hosts"
+      rm -f "$tmp"
+      tmp=""
+      # Reload only when the verified address changes. Never restart Avahi.
+      systemctl reload avahi-daemon.service
+    fi
   fi
-
-  sleep 60
+  sleep 60 &
+  wait $! || true
 done

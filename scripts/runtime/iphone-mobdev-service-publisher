@@ -1,9 +1,8 @@
 #!/bin/sh
 set -eu
 
-. /etc/altserver-native.env
+. "${ENV_FILE:-/etc/altserver-native.env}"
 
 service_name="${IPHONE_WIFI_MAC}@${IPHONE_UDID}"
 
 exec avahi-publish-service "$service_name" _apple-mobdev2._tcp 62078 --host=iphone-alt.local
-

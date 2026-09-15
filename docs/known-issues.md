@@ -1,4 +1,8 @@
-# 既知の問題と設計方針 / Known Issues
+# 旧版の既知の問題と設計方針 / Historical Known Issues
+
+以下はv0.1.x時点の調査記録です。v0.2.0の認証情報永続化、UTC時刻、端末探索、再起動抑制の修正は [runtime-fixes.md](runtime-fixes.md) を参照してください。上流netmuxdのheartbeat制約は引き続き残ります。
+
+The sections below describe v0.1.x. See [runtime-fixes.md](runtime-fixes.md) for current behavior. Upstream heartbeat limitations remain.
 
 ## 日本語
 

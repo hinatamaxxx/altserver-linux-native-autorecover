@@ -106,7 +106,16 @@ AltServer-LinuxのWi-Fiリフレッシュには、通常の `usbmuxd` だけで�
 
 ### 根本問題について
 
-この公開版は、`netmuxd` やAltServer-Linux本体を修正するものではありません。`netmuxd` が一時的にiPhoneを見失う問題を、1分ごとのhealthcheckと自動復旧で吸収する実用安定化版です。
+v0.2.0では、Anisetteの端末ID・認証データの保存漏れ、別端末のIPを拾う探索、毎分のAvahi再読み込み、通信の分割受信の誤判定を修正しました。短時間の障害では再起動せず、iPhoneの再登録とサービス障害を分けて処理します。上流netmuxd自体のheartbeat制約は残っています。
+
+既存環境は、旧Anisetteコンテナが存在する間に次を実行してください。現在の認証用データを保存してから更新します。
+
+```sh
+sudo sh scripts/upgrade-runtime.sh
+sudo /usr/local/sbin/altserver-native-healthcheck
+```
+
+二段階認証の保存漏れと移行・確認方法は [docs/runtime-fixes.md](docs/runtime-fixes.md) を参照してください。
 
 根本的な問題と今後の改善案は [docs/known-issues.md](docs/known-issues.md) にまとめています。
 

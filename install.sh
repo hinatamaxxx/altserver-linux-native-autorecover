@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ALTSTORE_AUTORECOVER_VERSION="0.1.0"
+ALTSTORE_AUTORECOVER_VERSION="0.2.0"
 ALTSERVER_VERSION="${ALTSERVER_VERSION:-v0.0.5}"
 ALTSERVER_REPO="${ALTSERVER_REPO:-NyaMisty/AltServer-Linux}"
 NETMUXD_REPO="${NETMUXD_REPO:-jkcoxson/netmuxd}"
@@ -114,7 +114,7 @@ install_packages() {
   packages="\
     avahi-daemon avahi-utils libavahi-compat-libdnssd-dev \
     curl ca-certificates netcat-openbsd python3 \
-    usbmuxd libimobiledevice-utils iproute2 tar gzip"
+    usbmuxd libimobiledevice-utils iproute2 tar gzip util-linux"
 
   if command -v docker >/dev/null 2>&1; then
     say "Docker is already installed; leaving the existing Docker installation untouched."
@@ -219,6 +219,7 @@ ALTSERVER_ANISETTE_SERVER=http://127.0.0.1:6969
 ANISETTE_URL=http://127.0.0.1:6969/
 ANISETTE_DOCKER_IMAGE=${ANISETTE_DOCKER_IMAGE:-dadoum/anisette-v3-server:latest}
 ANISETTE_DOCKER_VOLUME=${ANISETTE_DOCKER_VOLUME:-altserver-anisette-data}
+ANISETTE_STATE_DIR=${ANISETTE_STATE_DIR:-/var/lib/altserver-native/anisette}
 EOF
 
   chmod 600 "$ENV_FILE"
@@ -288,10 +289,16 @@ main() {
 
   script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
   ENV_FILE="$ENV_FILE" sh "$script_dir/scripts/install-helper-scripts.sh"
+  # The legacy container has --rm: save its identity BEFORE stopping it.
+  case "${ANISETTE_DOCKER_IMAGE:-dadoum/anisette-v3-server:latest}" in
+    dadoum/anisette-v3-server|dadoum/anisette-v3-server:*)
+      /usr/local/sbin/altserver-anisette-migrate
+      ;;
+  esac
   ENV_FILE="$ENV_FILE" sh "$script_dir/scripts/install-systemd-units.sh"
 
   systemctl enable altserver-native-healthcheck.timer altserver-native-boot-recover.service
-  systemctl restart docker.service avahi-daemon.service || true
+  systemctl start docker.service avahi-daemon.service
   systemctl restart altserver-anisette-docker.service || true
   systemctl restart altserver-native-netmuxd.service
   sleep 3

@@ -8,11 +8,16 @@ volume="${ANISETTE_DOCKER_VOLUME:-altserver-anisette-data}"
 
 case "$image" in
   dadoum/anisette-v3-server|dadoum/anisette-v3-server:*)
-    exec /usr/bin/docker run --rm --name altserver-anisette --network host \
-      -v "${volume}:/home/Alcoholic/.config/anisette-v3/lib/" \
-      "$image"
+    export ANISETTE_STATE_DIR="${ANISETTE_STATE_DIR:-/var/lib/altserver-native/anisette}"
+    /usr/local/sbin/altserver-anisette-migrate
+    /usr/bin/docker rm -f altserver-anisette >/dev/null 2>&1 || true
+    exec /usr/bin/docker run --name altserver-anisette --network host \
+      -v "${ANISETTE_STATE_DIR}:/home/Alcoholic/.config/anisette-v3" \
+      "$image" --host 127.0.0.1
     ;;
 esac
+
+/usr/bin/docker rm -f altserver-anisette >/dev/null 2>&1 || true
 
 if [ -n "${ANISETTE_BIN_MOUNT:-}" ] &&
    [ -n "${ANISETTE_LIB_MOUNT:-}" ] &&
