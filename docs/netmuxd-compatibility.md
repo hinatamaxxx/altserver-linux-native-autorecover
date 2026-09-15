@@ -97,4 +97,19 @@ sudo sh /var/lib/altserver-native/netmux-compat-trial/rollback.sh
 - 一時構成の公式netmuxdバイナリのSHA-256が配布版と一致（`d42e0d1ed1a29c38693083db919e4cb2e1ce9e08799fa19a2ee388882d9bcc23`）。
 - 実機のNetworkAddressが `bsd-ipv4` になり、healthcheckが正常。
 
-未確認: この一時構成でのAltStoreからのアプリ更新、切断後の再接続、長時間運用。これらを確認するまでは標準構成への採用や旧版指定の解除を行いません。
+- 利用者がUSBを外したAltStoreで「すべて更新」に成功し、二段階認証が要求されなかったことを確認。
+- netmuxdと変換処理を再起動した後、端末の再検出とhealthcheck正常を確認。
+- DynamicUser・ProtectSystem・ProtectHome・localhost限定のサンドボックス設定でも変換応答を確認。
+
+未確認: iPhoneのWi-Fi切断後の再接続によるアプリ更新、長時間運用、ホスト全体の再起動。通常インストーラの旧版指定はまだ解除しません。
+
+試験に成功した既存環境で設定を永続化する場合:
+
+```sh
+sudo sh scripts/keep-netmux-compat.sh
+# 永続化後に元の構成へ戻す場合
+sudo sh /var/lib/altserver-native/netmux-compat-trial/restore-original.sh
+```
+
+永続化は別名の公式バイナリと専用のsystemd drop-inを追加します。元のnetmuxdバイナリと基本unitは保持します。
+一時試験が有効な間だけ実行できます。上記の復旧スクリプトを置く前に自動ロールバックを解除することはありません。
