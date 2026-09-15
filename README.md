@@ -93,6 +93,8 @@ systemctl status altserver-anisette-docker.service
 
 ### Debianを再起動した後
 
+新しい互換性プロファイルでは、必要なサービスと起動時復旧の自動起動設定を確認済みです。ただし、この構成での電源断・ホスト全体の再起動試験は未実施です。[詳細](docs/netmuxd-compatibility.md#15秒ごとの確認とdebianの再起動)
+
 Debian再起動後、iPhone側で再度「信頼」が表示される場合があります。その場合は押してください。
 
 信頼後、healthcheckとboot recoveryがAltServerを復旧します。
@@ -101,13 +103,13 @@ Debian再起動後、iPhone側で再度「信頼」が表示される場合が�
 sudo /usr/local/sbin/altserver-native-healthcheck
 ```
 
-### なぜ netmuxd v0.1.4 固定？
+### 通常インストーラが netmuxd v0.1.4 を指定する理由
 
 AltServer-LinuxのWi-Fiリフレッシュには、通常の `usbmuxd` だけではなく `netmuxd` が必要です。
 
 検証中、`netmuxd v0.3.2` の現在のLinux向け配布アセットでは、AltServerはmDNSで見えているのにiPhone接続で失敗し、AltStore側では `AltServer could not be found` と表示されました。
 
-一方、`netmuxd v0.1.4` の `x86_64-linux-netmuxd` ではUSB/Wi-Fiの両方で動作しました。そのため、このセットアップでは再現性を優先して `v0.1.4` を固定しています。
+一方、`netmuxd v0.1.4` の `x86_64-linux-netmuxd` ではUSB/Wi-Fiの両方で動作しました。通常インストーラはこの既存の指定を維持しています。既存amd64環境では、[外部変換を使う互換性プロファイル](docs/netmuxd-compatibility.md)で未改造の公式v0.4.3へ移行できます。
 
 ### 根本問題について
 
@@ -153,6 +155,14 @@ journalctl -u altserver-native-netmuxd.service -n 80 --no-pager
 ```
 
 ## English
+
+### Official netmuxd v0.4.3 on an existing installation
+
+An opt-in profile supports **unmodified official netmuxd v0.4.3** with an external address-format adapter and automatic registration through the official API. Wi-Fi refresh and refresh after automatic re-registration were verified on an existing Debian amd64 host.
+
+Checks run 15 seconds after the previous check finishes; healthy checks do not restart services. Persistent systemd startup is configured and verified, but a full host reboot and long-duration operation have not been tested for this profile. The ordinary installer retains its previous default.
+
+See the [English investigation, setup and restoration guide](docs/netmuxd-compatibility.en.md) or [日本語](docs/netmuxd-compatibility.md).
 
 This repository provides an easy Debian setup for running [NyaMisty/AltServer-Linux](https://github.com/NyaMisty/AltServer-Linux) continuously with USB and Wi-Fi refresh support.
 

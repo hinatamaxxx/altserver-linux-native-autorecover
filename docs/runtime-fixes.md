@@ -1,5 +1,7 @@
 # v0.2.0: 認証情報の維持とWi-Fi復旧
 
+このページは基本プロファイルの説明です。公式netmuxd v0.4.3向けの外部変換・API再登録・15秒チェックは [日本語ガイド](netmuxd-compatibility.md) / [English guide](netmuxd-compatibility.en.md) を参照してください。
+
 ## 二段階認証が繰り返される構成上の原因
 
 旧構成は `/home/Alcoholic/.config/anisette-v3/lib/` だけをDocker volumeへ保存していました。しかし、AltServerが利用するv1互換APIの `device.json` と `adi.pb` は親の `anisette-v3/` にあります。`--rm` 付きコンテナを再作成すると、この端末IDとプロビジョニング情報が失われます。
@@ -74,6 +76,25 @@ AltServer-Linux v0.0.5の初回署名処理にも古い認証User-Agentが含ま
 
 ## English summary
 
+This page describes the base profile. For the opt-in official netmuxd v0.4.3 profile, external translation, API registration, 15-second checks, persistence and restoration, see the [English guide](netmuxd-compatibility.en.md).
+
 The old mount persisted libraries only; the v1 device identity and provisioning lived in the disposable container layer. The upgrade copies the existing complete configuration before container replacement and retains a backup. It validates that stable identity fields survive recreation. Apple may still require 2FA for independent session/account reasons.
 
 Discovery now matches the configured device, rejects synthetic feedback, handles fragmented usbmux frames, and reloads Avahi only on an address change. Missing devices trigger rediscovery without daemon restarts; confirmed daemon failures use a cooldown. Upstream heartbeat behavior and end-to-end AltStore authentication remain separate validation concerns.
+
+AltServer v0.0.5 interprets the UTC Anisette timestamp through local `mktime()`. A nine-hour offset was reproduced on the JST host. Setting `TZ=UTC` for the AltServer process corrects its response without changing the host timezone. Apply the runtime upgrade before stopping or removing the old disposable container:
+
+```sh
+sudo sh scripts/upgrade-runtime.sh
+sudo /usr/local/sbin/altserver-native-healthcheck
+```
+
+The upgrade preserves existing binary and USB pairing choices, migrates the full Anisette configuration, and backs up helpers/units/settings under the printed `/var/backups/altserver-runtime-*` path. Identity backups remain under `/var/lib/altserver-native/anisette-backup-*`. Migration expects the official image's UID/GID 1000; custom images and remote DOCKER_HOST setups are not automatically supported.
+
+Stable identity can be compared with `tools/check-anisette-identity.py capture` and `compare` using a root-only baseline path. The tool compares hashes of stable fields, not time-varying one-time data, and refuses to overwrite a baseline. See the commands in the Japanese section above.
+
+If NSCocoaErrorDomain 3840 remains, distinguish malformed authentication responses from network discovery. The [official AltStore feed](https://cdn.altstore.io/file/altstore/apps.json) documented the September 2026 client authentication fix and manual overwrite update; [AltSign PR #51](https://github.com/rileytestut/AltSign/pull/51) explains the User-Agent-related HTML response. Error 3840 alone is not a unique diagnosis. Updating server recovery does not update the authentication implementation inside an older iPhone client.
+
+Base-profile checks run one minute after completion; the new compatibility profile overrides this to 15 seconds. Exit codes are 0 for healthy infrastructure/registration, 1 for infrastructure or probe failure, 2 for an unavailable/unregistered phone, and 75 for another recovery check holding the lock. A healthy probe is not proof of app signing or installation success; confirm that in AltStore.
+
+When restoring runtime backups, preserve the persistent Anisette state. Blindly restoring the old container-removal startup behavior can reintroduce identity loss. Do not publish authentication backups or device logs.

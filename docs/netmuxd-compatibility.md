@@ -1,5 +1,7 @@
 # netmuxdのバージョン依存：原因と検証
 
+[English](netmuxd-compatibility.en.md)
+
 調査日: 2026-09-16。対象は未改造の AltServer-Linux v0.0.5 / Debian amd64。
 
 ## 特定した原因
@@ -67,10 +69,10 @@ python3 tools/check-netmux-compatibility.py --port 27016
 | Debianのlibimobiledevice更新 | AltServer配布物は静的リンク。OSの共有ライブラリを交換しても内蔵コードは変わらない |
 | usbmuxd2へ交換 | [現行Muxer.cpp](https://github.com/tihmstar/usbmuxd2/blob/744c46f/usbmuxd2/Muxer.cpp)もLinuxのsockaddr形式を返す。さらに公式リリースがなくビルド管理が必要。未導入 |
 | AltServer公式Linux更新版 | 調査時点の最新公開リリースはv0.0.5。利用可能なActions artifactもなかった |
-| 外部の形式変換プログラム | 利用者の「netmuxdを改造しなければよい」という方針で試験中。公式v0.4.3の応答形式を変換できることを実機確認 |
+| 外部の形式変換プログラム | 採用済み。公式v0.4.3の応答を変換し、自動再登録後のWi-Fi更新成功を確認。既存実機へ永続化済み |
 | Windows/macOS版AltServerへ移行 | Linuxサーバーとは運用先が変わる。今回のLinux構成の修正としては扱わず、未導入 |
 
-通常インストーラではv0.1.4指定を維持しています。以下の一時試験を、永続的な移行の完了とはしていません。
+通常インストーラではv0.1.4指定を維持しています。既存の検証実機には互換性プロファイルを永続化済みです。以下は新しくこのプロファイルを導入する場合の一時試験と永続化の手順です。
 
 ## 外部変換の一時試験
 
@@ -130,3 +132,12 @@ sudo sh /var/lib/altserver-native/netmux-compat-trial/restore-original.sh
 
 永続化は別名の公式バイナリと専用のsystemd drop-inを追加します。元のnetmuxdバイナリと基本unitは保持します。
 一時試験が有効な間だけ実行できます。上記の復旧スクリプトを置く前に自動ロールバックを解除することはありません。
+
+## 15秒ごとの確認とDebianの再起動
+
+チェック終了から15秒後に、Anisette応答、AltServerの実際の応答と広告、netmuxd応答、設定済みiPhoneの到達性と登録状態を確認します。正常なら変更しません。
+端末だけが未登録なら公式APIで登録し直します。USBペアリングの作り直しやAppleへの再ログインではありません。
+サービス障害は3回連続の失敗後に対象サービスを再起動し、5分間の再起動クールダウンを設けます。
+
+永続化後のunitとdrop-inは `/etc/systemd/system` に置かれます。実機で、関連サービス・起動時復旧・定期timerの自動起動有効化と、形式変換サービスが依存関係から起動する設定を確認しました。systemdのunit検証も成功しています。
+Debian起動後にiPhoneが同じネットワークへ戻れば自動再登録する設定ですが、**今回の構成で電源断から起動する実機試験は未実施**です。

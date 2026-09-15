@@ -10,6 +10,16 @@
 
 詳細は [netmuxd-compatibility.md](netmuxd-compatibility.md) を参照してください。以下の旧プロファイルの記録とは区別します。
 
+### English — official netmuxd profile
+
+- Unmodified official netmuxd v0.4.3 plus an external address adapter successfully refreshed apps over Wi-Fi without USB; the initial test required no additional two-factor prompt.
+- Toggling Wi-Fi exposed missing device registration. Official AddDevice API recovery was added, and the user confirmed refresh success after automatic registration.
+- Device discovery and health checks recovered after restarting the services.
+- 27 regression tests passed. Official binary checksums, persistent profile installation, DynamicUser execution, the 15-second check interval and retention of the original binary were verified.
+- Boot services and dependencies are configured for automatic startup. A full host reboot/power cycle, clean installation and long-duration operation remain untested for this profile.
+
+See the [English investigation and deployment guide](netmuxd-compatibility.en.md). The historical results below apply to earlier profiles.
+
 ## v0.2.0 — 2026-09-16
 
 Debian実機上で確認:
