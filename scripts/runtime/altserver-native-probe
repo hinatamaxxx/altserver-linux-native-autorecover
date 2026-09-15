@@ -202,6 +202,14 @@ def main():
             return 2
         if has_device(udid):
             return 0
+        if os.environ.get("NETMUXD_REGISTER_MODE") == "api":
+            # Official v0.4.3 has a single heartbeat registration path. Its
+            # mDNS cache may not emit a new resolution after heartbeat loss.
+            # Only the already verified configured phone may be re-added.
+            result = mux_request({"MessageType": "AddDevice", "ConnectionType": "Network",
+                                  "IPAddress": address, "DeviceID": udid,
+                                  "ServiceName": "_apple-mobdev2._tcp.local"})
+            return 0 if result.get("Result") == 1 and has_device(udid) else 1
         # v0.1.4's AddDevice starts two heartbeat workers for one device.
         # Reannounce instead, using its normal discovery path with one worker.
         subprocess.run(["systemctl", "restart", "iphone-mobdev-service.service"], check=True, timeout=15)

@@ -70,7 +70,7 @@ fi
 if ! "$probe" network; then
   log "re-registering the configured iPhone without restarting netmuxd or AltServer"
   if ! "$probe" register "$current_ip"; then
-    log "waiting_for_pairing: network registration/heartbeat unavailable; unlock iPhone and check USB trust"
+    log "waiting_for_registration: network registration/heartbeat unavailable; retrying on next check"
     if [ "$unhealthy" -ne 0 ]; then exit 1; fi
     exit 2
   fi

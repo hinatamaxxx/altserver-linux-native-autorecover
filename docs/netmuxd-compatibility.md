@@ -101,7 +101,20 @@ sudo sh /var/lib/altserver-native/netmux-compat-trial/rollback.sh
 - netmuxdと変換処理を再起動した後、端末の再検出とhealthcheck正常を確認。
 - DynamicUser・ProtectSystem・ProtectHome・localhost限定のサンドボックス設定でも変換応答を確認。
 
-未確認: iPhoneのWi-Fi切断後の再接続によるアプリ更新、長時間運用、ホスト全体の再起動。通常インストーラの旧版指定はまだ解除しません。
+### Wi-Fi再接続で見つかった別の問題
+
+最初のWi-Fiオフ→オン試験ではAltStoreが `AltServer could not be found` を返しました。
+その時点の変換前・変換後のDeviceListはどちらも空でした。一方、既存の厳密な探索チェックでiPhoneへの到達を確認できました。
+従来のmDNS再広告を繰り返しても登録されず、同じ到達先に公式v0.4.3の `AddDevice` APIを呼ぶと `Result=1` と端末登録が得られ、healthcheckも復旧しました。
+
+上流の `mdns.rs` はServiceResolvedで登録し、heartbeat切断時には端末を削除します。
+キャッシュ済みサービスの再登録通知が得られないことが、この状態の説明として考えられます。失敗時のmDNSパケット全体は採取していないため、キャッシュ内部の挙動まで実測したとはしていません。
+
+新版プロファイルではhealthcheckとboot-recoverに `NETMUXD_REGISTER_MODE=api` を指定し、端末が未登録の場合だけ、再検証した接続先をAddDeviceで登録します。
+復旧間隔は約1分です。端末が一覧にあれば重複登録せず、別端末・検証できない接続先も登録しません。
+旧v0.1.4プロファイルは従来の再広告処理を維持します。新版API登録経路を含む27件のテストに成功しました。
+
+未確認: API登録を加えた後のWi-Fi再接続によるアプリ更新、長時間運用、ホスト全体の再起動。通常インストーラの旧版指定はまだ解除しません。
 
 試験に成功した既存環境で設定を永続化する場合:
 
