@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Loopback usbmux adapter for the BSD layout expected by AltServer v0.0.5.
+
+Only NetworkAddress in device announcements is rewritten. Pairing responses
+and tunneled service traffic remain byte-for-byte intact. No payload logging.
+"""
+import argparse
+import asyncio
+import contextlib
+import plistlib
+import struct
+
+MAX_FRAME = 4 * 1024 * 1024
+MAX_CLIENTS = 32
+
+
+def bsd_address(value):
+    if not isinstance(value, bytes):
+        raise ValueError("invalid address")
+    if len(value) >= 16 and value[:2] == b"\x02\x00":
+        return b"\x10\x02" + value[2:]
+    if len(value) >= 28 and value[:2] == b"\x0a\x00":
+        return b"\x1c\x1e" + value[2:]
+    if len(value) >= 16 and value[1] == 2 and 8 <= value[0] <= len(value):
+        return value
+    if len(value) >= 28 and value[:2] == b"\x1c\x1e":
+        return value
+    raise ValueError("unsupported address layout")
+
+
+def translate(payload):
+    changed = False
+    entries = payload.get("DeviceList", [])
+    if payload.get("MessageType") == "Attached":
+        entries = [payload]
+    if not isinstance(entries, list):
+        raise ValueError("invalid list")
+    for entry in entries:
+        properties = entry.get("Properties", {})
+        if properties.get("ConnectionType") == "Network":
+            original = properties.get("NetworkAddress")
+            converted = bsd_address(original)
+            if converted != original:
+                properties["NetworkAddress"] = converted
+                changed = True
+    return changed
+
+
+async def frame(reader):
+    header = await reader.readexactly(16)
+    size, version, kind, tag = struct.unpack("<IIII", header)
+    if not 16 < size <= MAX_FRAME or (version, kind) != (1, 8):
+        raise ValueError("invalid frame")
+    body = await reader.readexactly(size - 16)
+    payload = plistlib.loads(body)
+    if not isinstance(payload, dict):
+        raise ValueError("invalid plist")
+    return header + body, tag, payload
+
+
+async def copy(reader, writer):
+    while data := await reader.read(65536):
+        writer.write(data)
+        await writer.drain()
+
+
+class Adapter:
+    def __init__(self, upstream_port):
+        self.upstream_port = upstream_port
+        self.active = 0
+
+    async def handle(self, reader, writer):
+        if self.active >= MAX_CLIENTS:
+            writer.close()
+            await writer.wait_closed()
+            return
+        self.active += 1
+        upstream_writer = None
+        tasks = []
+        pending = {}
+        try:
+            upstream_reader, upstream_writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", self.upstream_port), 5)
+
+            async def requests():
+                while True:
+                    wire, tag, payload = await frame(reader)
+                    connecting = payload.get("MessageType") == "Connect"
+                    if connecting:
+                        pending[tag] = asyncio.get_running_loop().create_future()
+                    upstream_writer.write(wire)
+                    await upstream_writer.drain()
+                    if connecting:
+                        if await pending[tag]:
+                            await copy(reader, upstream_writer)
+                            if upstream_writer.can_write_eof():
+                                upstream_writer.write_eof()
+                            # A client half-close still permits a final reply.
+                            await asyncio.Future()
+                        del pending[tag]
+
+            async def responses():
+                while True:
+                    wire, tag, payload = await frame(upstream_reader)
+                    if translate(payload):
+                        body = plistlib.dumps(payload)
+                        wire = struct.pack("<IIII", len(body) + 16, 1, 8, tag) + body
+                    writer.write(wire)
+                    await writer.drain()
+                    if tag in pending and payload.get("MessageType") == "Result":
+                        success = payload.get("Number") == 0
+                        pending[tag].set_result(success)
+                        if success:
+                            await copy(upstream_reader, writer)
+                            return
+
+            tasks = [asyncio.create_task(requests()), asyncio.create_task(responses())]
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        except (OSError, ValueError, asyncio.TimeoutError):
+            pass
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            for stream in (writer, upstream_writer):
+                if stream is not None:
+                    stream.close()
+                    with contextlib.suppress(OSError):
+                        await stream.wait_closed()
+            self.active -= 1
+
+
+async def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", type=int, default=27015)
+    parser.add_argument("--upstream-port", type=int, default=27016)
+    args = parser.parse_args()
+    if args.port == args.upstream_port:
+        parser.error("listener and upstream ports must differ")
+    adapter = Adapter(args.upstream_port)
+    server = await asyncio.start_server(adapter.handle, "127.0.0.1", args.port)
+    async with server:
+        await server.serve_forever()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

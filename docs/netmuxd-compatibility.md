@@ -67,7 +67,34 @@ python3 tools/check-netmux-compatibility.py --port 27016
 | Debianのlibimobiledevice更新 | AltServer配布物は静的リンク。OSの共有ライブラリを交換しても内蔵コードは変わらない |
 | usbmuxd2へ交換 | [現行Muxer.cpp](https://github.com/tihmstar/usbmuxd2/blob/744c46f/usbmuxd2/Muxer.cpp)もLinuxのsockaddr形式を返す。さらに公式リリースがなくビルド管理が必要。未導入 |
 | AltServer公式Linux更新版 | 調査時点の最新公開リリースはv0.0.5。利用可能なActions artifactもなかった |
-| 外部の形式変換プログラム | netmuxd本体をそのまま利用できるが、変換部分の保守と実機検証が必要。採否は利用者の方針確認中 |
+| 外部の形式変換プログラム | 利用者の「netmuxdを改造しなければよい」という方針で試験中。公式v0.4.3の応答形式を変換できることを実機確認 |
 | Windows/macOS版AltServerへ移行 | Linuxサーバーとは運用先が変わる。今回のLinux構成の修正としては扱わず、未導入 |
 
-現時点ではv0.1.4指定を維持しています。「バージョン依存がなくなった」とはしていません。
+通常インストーラではv0.1.4指定を維持しています。以下の一時試験を、永続的な移行の完了とはしていません。
+
+## 外部変換の一時試験
+
+`scripts/runtime/altserver-netmux-compat` はPython標準ライブラリだけで動作するlocalhost限定の中継です。
+ListDevicesとAttachedのNetworkAddressだけをBSD形式へ変換します。ペアリング応答は元のフレームのまま転送し、Connect成功後はバイト列をそのまま双方向転送します。
+netmuxd本体・依存ライブラリへのパッチはありません。
+
+```sh
+sudo sh scripts/trial-netmux-compat.sh
+```
+
+amd64用の公式v0.4.3アーカイブをSHA-256検証し、別ディレクトリに配置します。
+既存のnetmuxdバイナリは保持し、`/run` 配下の一時unit設定で旧AltServer→27015の変換プロセス→27016の公式netmuxdへ接続します。
+20分後に元の設定へ戻すsystemd timerを先に設定します。試験中のホスト再起動でも一時unit設定は消えます。
+
+```sh
+# 時間を待たずに元へ戻す
+sudo sh /var/lib/altserver-native/netmux-compat-trial/rollback.sh
+```
+
+検証済み:
+
+- Debian上で23件の回帰テスト成功。フレーム分割、端末一覧と通知の変換、ペアリング応答の完全一致、Connect後の双方向通信、送信終了後の応答、接続拒否後の継続、巨大フレーム拒否を含む。
+- 一時構成の公式netmuxdバイナリのSHA-256が配布版と一致（`d42e0d1ed1a29c38693083db919e4cb2e1ce9e08799fa19a2ee388882d9bcc23`）。
+- 実機のNetworkAddressが `bsd-ipv4` になり、healthcheckが正常。
+
+未確認: この一時構成でのAltStoreからのアプリ更新、切断後の再接続、長時間運用。これらを確認するまでは標準構成への採用や旧版指定の解除を行いません。
