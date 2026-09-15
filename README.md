@@ -6,6 +6,10 @@ Debianで [NyaMisty/AltServer-Linux](https://github.com/NyaMisty/AltServer-Linux
 
 ## 日本語
 
+### 開発に使用したAI
+
+2026年9月の不具合調査、修正コード、テスト、ドキュメントの作成には、OpenAIの [Codex](https://openai.com/codex/)（GPT-6ベース）を使用しました。モデル表記は今回の作業セッションで確認できる情報に基づきます。iPhone上の更新結果は利用者が実機で確認しています。
+
 ### 既存環境で公式netmuxd v0.4.3を使う
 
 旧AltServerとのアドレス形式の不一致を、**netmuxd本体を変更しない外部変換**で解消する互換性プロファイルを追加しました。Wi-Fi再接続後は公式APIで端末を再登録します。
@@ -155,6 +159,10 @@ journalctl -u altserver-native-netmuxd.service -n 80 --no-pager
 ```
 
 ## English
+
+### AI used during development
+
+The September 2026 investigation, implementation, tests and documentation were developed with OpenAI [Codex](https://openai.com/codex/) (GPT-6-based). This model description reflects the information available in the development session. The user verified app refresh results on the physical iPhone.
 
 ### Official netmuxd v0.4.3 on an existing installation
 
