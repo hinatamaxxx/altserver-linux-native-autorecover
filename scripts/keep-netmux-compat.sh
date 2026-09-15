@@ -29,6 +29,7 @@ rm -f /run/systemd/system/altserver-netmux-compat.service
 for location in /run /etc; do
     rm -f "$location/systemd/system/altserver-native-healthcheck.service.d/50-netmux-api.conf"
     rm -f "$location/systemd/system/altserver-native-boot-recover.service.d/50-netmux-api.conf"
+    rm -f "$location/systemd/system/altserver-native-healthcheck.timer.d/50-netmux-api.conf"
 done
 systemctl daemon-reload
 systemctl start altserver-native-netmuxd.service
@@ -41,6 +42,15 @@ for unit in altserver-native-healthcheck altserver-native-boot-recover; do
     install -d "/etc/systemd/system/$unit.service.d"
     printf '[Service]\nEnvironment=NETMUXD_REGISTER_MODE=api\n' >"/etc/systemd/system/$unit.service.d/50-netmux-api.conf"
 done
+install -d /etc/systemd/system/altserver-native-healthcheck.timer.d
+cat >/etc/systemd/system/altserver-native-healthcheck.timer.d/50-netmux-api.conf <<'TIMER'
+[Timer]
+OnBootSec=
+OnUnitInactiveSec=
+OnBootSec=15s
+OnUnitInactiveSec=15s
+AccuracySec=1s
+TIMER
 cat >/etc/systemd/system/altserver-native-netmuxd.service.d/50-official-compat.conf <<UNIT
 [Unit]
 Wants=altserver-netmux-compat.service
@@ -78,8 +88,10 @@ rm -f /run/systemd/system/altserver-native-netmuxd.service.d/90-compat-trial.con
 rm -f /run/systemd/system/altserver-netmux-compat.service
 rm -f /run/systemd/system/altserver-native-healthcheck.service.d/50-netmux-api.conf
 rm -f /run/systemd/system/altserver-native-boot-recover.service.d/50-netmux-api.conf
+rm -f /run/systemd/system/altserver-native-healthcheck.timer.d/50-netmux-api.conf
 systemctl daemon-reload
 systemctl start altserver-native-netmuxd.service altserver-netmux-compat.service
 systemctl restart iphone-mobdev-service.service
 systemctl start altserver-native.service altserver-native-healthcheck.timer
+install -m 700 "$trial/restore-original.sh" "$trial/rollback.sh"
 echo "Official netmuxd compatibility profile installed. Restore: sh $trial/restore-original.sh"

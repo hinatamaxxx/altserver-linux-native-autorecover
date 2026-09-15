@@ -25,6 +25,7 @@ rm -f /run/systemd/system/altserver-native-netmuxd.service.d/90-compat-trial.con
 rm -f /run/systemd/system/altserver-netmux-compat.service
 rm -f /run/systemd/system/altserver-native-healthcheck.service.d/50-netmux-api.conf
 rm -f /run/systemd/system/altserver-native-boot-recover.service.d/50-netmux-api.conf
+rm -f /run/systemd/system/altserver-native-healthcheck.timer.d/50-netmux-api.conf
 systemctl daemon-reload
 systemctl start altserver-native-netmuxd.service
 systemctl restart iphone-mobdev-service.service
@@ -39,6 +40,15 @@ for unit in altserver-native-healthcheck altserver-native-boot-recover; do
     install -d "/run/systemd/system/$unit.service.d"
     printf '[Service]\nEnvironment=NETMUXD_REGISTER_MODE=api\n' >"/run/systemd/system/$unit.service.d/50-netmux-api.conf"
 done
+install -d /run/systemd/system/altserver-native-healthcheck.timer.d
+cat >/run/systemd/system/altserver-native-healthcheck.timer.d/50-netmux-api.conf <<'TIMER'
+[Timer]
+OnBootSec=
+OnUnitInactiveSec=
+OnBootSec=15s
+OnUnitInactiveSec=15s
+AccuracySec=1s
+TIMER
 cat >"$override" <<UNIT
 [Service]
 ExecStart=

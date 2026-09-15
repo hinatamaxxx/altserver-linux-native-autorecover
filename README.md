@@ -6,6 +6,11 @@ Debianで [NyaMisty/AltServer-Linux](https://github.com/NyaMisty/AltServer-Linux
 
 ## 日本語
 
+### 既存環境で公式netmuxd v0.4.3を使う
+
+旧AltServerとのアドレス形式の不一致を、**netmuxd本体を変更しない外部変換**で解消する互換性プロファイルを追加しました。Wi-Fi再接続後は公式APIで端末を再登録します。
+amd64の既存実機でWi-Fi更新を確認しています。[原因・試験・永続化・元に戻す手順](docs/netmuxd-compatibility.md)を参照してください。通常インストーラの既存デフォルトとは別の、明示的に導入するプロファイルです。
+
 ### これは何？
 
 「Debian端末をAltServer専用機として置いておきたい」「Windows PCを常時起動できない」「USBでは動くのにWi-Fi refreshが不安定」という人向けのセットアップです。
