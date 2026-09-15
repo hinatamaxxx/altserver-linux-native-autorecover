@@ -29,13 +29,16 @@ const allowedKeywordFiles = new Set([
   "docs/troubleshooting.md",
   "docs/known-issues.md",
   "docs/verification.md",
+  "docs/runtime-fixes.md",
+  "scripts/runtime/altserver-native-probe",
+  "tests/test_runtime.py",
   "tools/privacy-scan.js",
 ]);
 
 function walk(dir) {
   const out = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === ".git") continue;
+    if ([".git", "__pycache__"].includes(entry.name)) continue;
     const filePath = path.join(dir, entry.name);
     if (entry.isDirectory()) out.push(...walk(filePath));
     else out.push(filePath);

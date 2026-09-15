@@ -1,4 +1,10 @@
-# 既知の問題と設計方針 / Known Issues
+# 旧版の既知の問題と設計方針 / Historical Known Issues
+
+2026-09-16: バージョン依存の具体的な原因を通信データで特定しました。[netmuxdの互換性調査](netmuxd-compatibility.md)を参照してください。v0.4.3への単純更新でも解消しません。
+
+以下はv0.1.x時点の調査記録です。v0.2.0の認証情報永続化、UTC時刻、端末探索、再起動抑制の修正は [runtime-fixes.md](runtime-fixes.md) を参照してください。上流netmuxdのheartbeat制約は引き続き残ります。
+
+The sections below describe v0.1.x. See [runtime-fixes.md](runtime-fixes.md) for current behavior. Upstream heartbeat limitations remain.
 
 ## 日本語
 

@@ -6,6 +6,11 @@ Debianで [NyaMisty/AltServer-Linux](https://github.com/NyaMisty/AltServer-Linux
 
 ## 日本語
 
+### 既存環境で公式netmuxd v0.4.3を使う
+
+旧AltServerとのアドレス形式の不一致を、**netmuxd本体を変更しない外部変換**で解消する互換性プロファイルを追加しました。Wi-Fi再接続後は公式APIで端末を再登録します。
+amd64の既存実機でWi-Fi更新を確認しています。[原因・試験・永続化・元に戻す手順](docs/netmuxd-compatibility.md)を参照してください。通常インストーラの既存デフォルトとは別の、明示的に導入するプロファイルです。
+
 ### これは何？
 
 「Debian端末をAltServer専用機として置いておきたい」「Windows PCを常時起動できない」「USBでは動くのにWi-Fi refreshが不安定」という人向けのセットアップです。
@@ -88,6 +93,8 @@ systemctl status altserver-anisette-docker.service
 
 ### Debianを再起動した後
 
+新しい互換性プロファイルでは、必要なサービスと起動時復旧の自動起動設定を確認済みです。ただし、この構成での電源断・ホスト全体の再起動試験は未実施です。[詳細](docs/netmuxd-compatibility.md#15秒ごとの確認とdebianの再起動)
+
 Debian再起動後、iPhone側で再度「信頼」が表示される場合があります。その場合は押してください。
 
 信頼後、healthcheckとboot recoveryがAltServerを復旧します。
@@ -96,17 +103,26 @@ Debian再起動後、iPhone側で再度「信頼」が表示される場合が�
 sudo /usr/local/sbin/altserver-native-healthcheck
 ```
 
-### なぜ netmuxd v0.1.4 固定？
+### 通常インストーラが netmuxd v0.1.4 を指定する理由
 
 AltServer-LinuxのWi-Fiリフレッシュには、通常の `usbmuxd` だけではなく `netmuxd` が必要です。
 
 検証中、`netmuxd v0.3.2` の現在のLinux向け配布アセットでは、AltServerはmDNSで見えているのにiPhone接続で失敗し、AltStore側では `AltServer could not be found` と表示されました。
 
-一方、`netmuxd v0.1.4` の `x86_64-linux-netmuxd` ではUSB/Wi-Fiの両方で動作しました。そのため、このセットアップでは再現性を優先して `v0.1.4` を固定しています。
+一方、`netmuxd v0.1.4` の `x86_64-linux-netmuxd` ではUSB/Wi-Fiの両方で動作しました。通常インストーラはこの既存の指定を維持しています。既存amd64環境では、[外部変換を使う互換性プロファイル](docs/netmuxd-compatibility.md)で未改造の公式v0.4.3へ移行できます。
 
 ### 根本問題について
 
-この公開版は、`netmuxd` やAltServer-Linux本体を修正するものではありません。`netmuxd` が一時的にiPhoneを見失う問題を、1分ごとのhealthcheckと自動復旧で吸収する実用安定化版です。
+v0.2.0では、Anisetteの端末ID・認証データの保存漏れ、別端末のIPを拾う探索、毎分のAvahi再読み込み、通信の分割受信の誤判定を修正しました。短時間の障害では再起動せず、iPhoneの再登録とサービス障害を分けて処理します。上流netmuxd自体のheartbeat制約は残っています。
+
+既存環境は、旧Anisetteコンテナが存在する間に次を実行してください。現在の認証用データを保存してから更新します。
+
+```sh
+sudo sh scripts/upgrade-runtime.sh
+sudo /usr/local/sbin/altserver-native-healthcheck
+```
+
+二段階認証の保存漏れと移行・確認方法は [docs/runtime-fixes.md](docs/runtime-fixes.md) を参照してください。
 
 根本的な問題と今後の改善案は [docs/known-issues.md](docs/known-issues.md) にまとめています。
 
@@ -139,6 +155,14 @@ journalctl -u altserver-native-netmuxd.service -n 80 --no-pager
 ```
 
 ## English
+
+### Official netmuxd v0.4.3 on an existing installation
+
+An opt-in profile supports **unmodified official netmuxd v0.4.3** with an external address-format adapter and automatic registration through the official API. Wi-Fi refresh and refresh after automatic re-registration were verified on an existing Debian amd64 host.
+
+Checks run 15 seconds after the previous check finishes; healthy checks do not restart services. Persistent systemd startup is configured and verified, but a full host reboot and long-duration operation have not been tested for this profile. The ordinary installer retains its previous default.
+
+See the [English investigation, setup and restoration guide](docs/netmuxd-compatibility.en.md) or [日本語](docs/netmuxd-compatibility.md).
 
 This repository provides an easy Debian setup for running [NyaMisty/AltServer-Linux](https://github.com/NyaMisty/AltServer-Linux) continuously with USB and Wi-Fi refresh support.
 

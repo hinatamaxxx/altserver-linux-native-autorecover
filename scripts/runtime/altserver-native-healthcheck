@@ -1,161 +1,83 @@
 #!/bin/sh
 set -eu
+set -a
+. "${ENV_FILE:-/etc/altserver-native.env}"
+set +a
 
-. /etc/altserver-native.env
+state="${ALTSERVER_HEALTH_STATE_DIR:-/run/altserver-native-health}"
+install -d -m 0700 "$state"
+exec 9>"$state/lock"
+flock -n 9 || exit 75
+probe="${ALTSERVER_PROBE:-/usr/local/sbin/altserver-native-probe}"
 
-log() {
-  logger -t altserver-health "$*"
-  echo "$*"
-}
-
-anisette_ok() {
-  headers="$(mktemp)"
-  body="$(mktemp)"
-  if curl -fsS --max-time 5 -D "$headers" "$ANISETTE_URL" -o "$body" &&
-     grep -qi '^Content-Type: application/json' "$headers"; then
-    rm -f "$headers" "$body"
+log() { logger -t altserver-health "$*"; printf '%s\n' "$*"; }
+reset() { rm -f "$state/$1.failures"; }
+recover() {
+  component="$1"
+  unit="$2"
+  failures=0
+  if [ -f "$state/$component.failures" ]; then
+    read -r failures <"$state/$component.failures"
+  fi
+  failures=$((failures + 1))
+  printf '%s\n' "$failures" >"$state/$component.failures"
+  if [ "$failures" -lt 3 ]; then
+    log "$component check failed ($failures/3); waiting for confirmation"
     return 0
   fi
-  rm -f "$headers" "$body"
-  return 1
-}
-
-find_iphone_ip() {
-  ipaddr="$(ip neigh show | awk -v mac="$(printf '%s' "$IPHONE_WIFI_MAC" | tr 'A-F' 'a-f')" '
-    $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && tolower($0) ~ mac {print $1; exit}
-  ')"
-  if [ -n "${ipaddr:-}" ] && nc -z -w 2 "$ipaddr" 62078 >/dev/null 2>&1; then
-    printf '%s\n' "$ipaddr"
+  last=0
+  if [ -f "$state/$component.restarted" ]; then
+    read -r last <"$state/$component.restarted"
+  fi
+  now="$(date +%s)"
+  if [ "$((now - last))" -lt 300 ]; then
+    log "$component recovery cooldown active"
     return 0
   fi
+  printf '%s\n' "$now" >"$state/$component.restarted"
+  log "recovering $component after repeated failures"
+  systemctl restart "$unit"
+}
 
-  ipaddr="$(timeout 8 avahi-browse -rt _apple-mobdev2._tcp 2>/dev/null |
-    sed -n 's/.*address = \[\([0-9][0-9.]*\)\].*/\1/p' |
-    while read candidate; do
-      if nc -z -w 2 "$candidate" 62078 >/dev/null 2>&1; then
-        printf '%s\n' "$candidate"
-        break
-      fi
-    done)"
-  if [ -n "${ipaddr:-}" ]; then
-    printf '%s\n' "$ipaddr"
-    return 0
+unhealthy=0
+if "$probe" anisette; then
+  reset anisette
+else
+  recover anisette altserver-anisette-docker.service
+  unhealthy=1
+fi
+
+# Check the server even when the phone is asleep or away.
+if systemctl is-active --quiet altserver-native.service && "$probe" altserver; then
+  reset altserver
+else
+  recover altserver altserver-native.service
+  unhealthy=1
+fi
+
+if ! systemctl is-active --quiet altserver-native-netmuxd.service || ! "$probe" query; then
+  recover netmux altserver-native-netmuxd.service
+  exit 1
+fi
+reset netmux
+
+if ! current_ip="$("$probe" discover)"; then
+  log "waiting_for_device: configured iPhone is unavailable; infrastructure checked"
+  if [ "$unhealthy" -ne 0 ]; then exit 1; fi
+  exit 2
+fi
+
+if ! "$probe" network; then
+  log "re-registering the configured iPhone without restarting netmuxd or AltServer"
+  if ! "$probe" register "$current_ip"; then
+    log "waiting_for_registration: network registration/heartbeat unavailable; retrying on next check"
+    if [ "$unhealthy" -ne 0 ]; then exit 1; fi
+    exit 2
   fi
-
-  if [ -n "${IPHONE_FALLBACK_IP:-}" ] && nc -z -w 2 "$IPHONE_FALLBACK_IP" 62078 >/dev/null 2>&1; then
-    printf '%s\n' "$IPHONE_FALLBACK_IP"
-    return 0
-  fi
-
-  return 1
-}
-
-iphone_port_ok() {
-  CURRENT_IPHONE_IP="$(find_iphone_ip)"
-  export CURRENT_IPHONE_IP
-}
-
-netmux_has_network_device() {
-  python3 - "$IPHONE_UDID" <<'PY'
-import json
-import plistlib
-import socket
-import struct
-import sys
-
-udid = sys.argv[1]
-payload = {
-    "MessageType": "ListDevices",
-    "ClientVersionString": "altserver-health",
-    "ProgName": "altserver-health",
-    "kLibUSBMuxVersion": 3,
-}
-body = plistlib.dumps(payload, fmt=plistlib.FMT_XML)
-packet = struct.pack("<IIII", 16 + len(body), 1, 8, 1) + body
-try:
-    with socket.create_connection(("127.0.0.1", 27015), timeout=5) as sock:
-        sock.sendall(packet)
-        header = sock.recv(16)
-        if len(header) != 16:
-            raise RuntimeError("short header")
-        length, version, msgtype, tag = struct.unpack("<IIII", header)
-        data = b""
-        while len(data) < length - 16:
-            chunk = sock.recv(length - 16 - len(data))
-            if not chunk:
-                break
-            data += chunk
-    try:
-        obj = plistlib.loads(data)
-    except Exception:
-        obj = json.loads(data.decode())
-except Exception as exc:
-    print(f"netmux query failed: {exc}", file=sys.stderr)
-    raise SystemExit(1)
-
-for dev in obj.get("DeviceList", []):
-    props = dev.get("Properties", {})
-    if props.get("SerialNumber") == udid and props.get("ConnectionType") == "Network":
-        raise SystemExit(0)
-
-print(obj, file=sys.stderr)
-raise SystemExit(1)
-PY
-}
-
-altserver_mdns_ok() {
-  timeout 8 avahi-browse -rt _altserver._tcp 2>/dev/null | grep -q "address = \[$ALTSERVER_HOST_IP\]"
-}
-
-recover_anisette() {
-  log "recovering anisette service"
-  systemctl restart altserver-anisette-docker.service || true
-  sleep 5
-}
-
-recover_netmux() {
-  log "recovering netmuxd and iPhone mDNS publishers"
-  systemctl restart altserver-native-netmuxd.service || true
-  sleep 3
-  systemctl restart iphone-mobdev-address.service iphone-mobdev-service.service || true
-  sleep 8
-}
-
-recover_altserver() {
-  log "recovering AltServer service"
-  systemctl restart altserver-native.service || true
-  sleep 8
-}
-
-if ! systemctl is-active --quiet altserver-anisette-docker.service || ! anisette_ok; then
-  log "anisette unhealthy"
-  recover_anisette
 fi
 
-if ! iphone_port_ok; then
-  log "iPhone Wi-Fi sync port 62078 is not reachable; leaving services running"
-  exit 0
+if [ "$unhealthy" -ne 0 ]; then
+  log "degraded: recovery pending; no healthy result claimed"
+  exit 1
 fi
-
-if ! systemctl is-active --quiet altserver-native-netmuxd.service || ! netmux_has_network_device; then
-  log "netmuxd does not expose configured iPhone as Network"
-  recover_netmux
-fi
-
-if ! systemctl is-active --quiet altserver-native.service || ! altserver_mdns_ok; then
-  log "AltServer service or mDNS advertisement unhealthy"
-  recover_altserver
-fi
-
-i=0
-while [ "$i" -lt 5 ]; do
-  if anisette_ok && netmux_has_network_device && altserver_mdns_ok; then
-    log "healthy"
-    exit 0
-  fi
-  i=$((i+1))
-  sleep 3
-done
-
-log "still unhealthy after recovery"
-exit 1
+log "healthy"

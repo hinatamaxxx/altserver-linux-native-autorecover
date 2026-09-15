@@ -44,6 +44,7 @@ Wants=network-online.target avahi-daemon.service altserver-anisette-docker.servi
 Type=simple
 WorkingDirectory=${ALTSERVER_HOME}
 EnvironmentFile=${ENV_FILE}
+Environment=TZ=UTC
 ExecStart=${ALTSERVER_BIN}
 Restart=always
 RestartSec=5
@@ -63,10 +64,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Environment="ENV_FILE=${ENV_FILE}"
 Restart=always
 RestartSec=5
 TimeoutStartSec=60
-ExecStartPre=-/usr/bin/docker rm -f altserver-anisette
 ExecStartPre=/bin/sh -c 'i=0; while [ "\$i" -lt 30 ]; do /usr/bin/docker info >/dev/null 2>&1 && exit 0; i=\$((i+1)); sleep 2; done; exit 1'
 ExecStart=/usr/local/sbin/altserver-anisette-docker-run
 ExecStop=/usr/bin/docker stop altserver-anisette
@@ -75,7 +76,7 @@ ExecStop=/usr/bin/docker stop altserver-anisette
 WantedBy=multi-user.target
 UNIT
 
-cat >/etc/systemd/system/iphone-mobdev-address.service <<'UNIT'
+cat >/etc/systemd/system/iphone-mobdev-address.service <<UNIT
 [Unit]
 Description=Publish iPhone Wi-Fi address for netmuxd
 After=network-online.target avahi-daemon.service
@@ -83,7 +84,8 @@ Wants=network-online.target avahi-daemon.service
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/altserver-native.env
+EnvironmentFile=${ENV_FILE}
+Environment="ENV_FILE=${ENV_FILE}"
 ExecStart=/usr/local/sbin/iphone-mobdev-address-publisher
 Restart=always
 RestartSec=5
@@ -92,7 +94,7 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT
 
-cat >/etc/systemd/system/iphone-mobdev-service.service <<'UNIT'
+cat >/etc/systemd/system/iphone-mobdev-service.service <<UNIT
 [Unit]
 Description=Publish iPhone mobdev service for netmuxd
 After=network-online.target avahi-daemon.service iphone-mobdev-address.service
@@ -100,7 +102,8 @@ Wants=network-online.target avahi-daemon.service iphone-mobdev-address.service
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/altserver-native.env
+EnvironmentFile=${ENV_FILE}
+Environment="ENV_FILE=${ENV_FILE}"
 ExecStart=/usr/local/sbin/iphone-mobdev-service-publisher
 Restart=always
 RestartSec=5

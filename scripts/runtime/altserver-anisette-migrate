@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Preserve the existing v1 identity before replacing an anisette container."""
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+
+def docker(*args):
+    return subprocess.check_output(["docker", *args], text=True)
+
+
+def secure_state(target):
+    # The official Alcoholic user is UID/GID 1000. docker cp may map owners
+    # to the host caller, so normalize explicitly before the bind mount.
+    for path in [target, *target.rglob("*")]:
+        if path.is_symlink():
+            raise SystemExit("Unexpected symlink in anisette state")
+        os.chown(path, 1000, 1000)
+    target.chmod(0o700)
+    for name in ("device.json", "adi.pb"):
+        if (target / name).exists():
+            (target / name).chmod(0o600)
+
+
+def main():
+    target = Path(os.environ.get("ANISETTE_STATE_DIR", "/var/lib/altserver-native/anisette"))
+    if not target.is_absolute() or target == Path("/"):
+        raise SystemExit("ANISETTE_STATE_DIR must be an absolute dedicated directory")
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if (target / "device.json").is_file():
+        if not (target / "adi.pb").is_file():
+            raise SystemExit("Persistent provisioning missing; refusing identity regeneration")
+        secure_state(target)
+        print("Existing persistent anisette identity retained")
+        return
+    if target.exists() and any(target.iterdir()):
+        raise SystemExit("Incomplete anisette state directory; refusing to overwrite it")
+    listed = docker("ps", "-a", "--filter", "name=^/altserver-anisette$", "--format", "{{.ID}}").strip()
+    if not listed:
+        target.mkdir(exist_ok=True, mode=0o700)
+        # Official image runs as its unprivileged user.
+        os.chown(target, 1000, 1000)
+        print("Prepared persistent anisette state for first installation")
+        return
+    info = json.loads(docker("inspect", listed))[0]
+    if not info["Config"]["Image"].startswith("dadoum/anisette-v3-server"):
+        raise SystemExit("Existing container is not anisette-v3; manual migration required")
+    source = "/home/Alcoholic/.config/anisette-v3"
+    with tempfile.TemporaryDirectory(prefix="anisette-migrate-", dir=target.parent) as tmp:
+        staged = Path(tmp) / "state"
+        staged.mkdir()
+        docker("cp", "-a", f"{listed}:{source}/.", str(staged))
+        if not (staged / "device.json").is_file() or not (staged / "adi.pb").is_file():
+            raise SystemExit("Existing identity/provisioning missing; original container retained")
+        # Retain a separate root-only copy for rollback. Never log its contents.
+        backup = Path(tempfile.mkdtemp(prefix="anisette-backup-", dir=target.parent))
+        shutil.copytree(staged, backup / "state", copy_function=shutil.copy2)
+        if target.exists():
+            target.rmdir()  # Only the empty directory accepted above.
+        staged.rename(target)
+        secure_state(target)
+        print("Existing anisette identity and provisioning migrated; backup retained")
+
+
+if __name__ == "__main__":
+    main()
